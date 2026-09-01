@@ -2,10 +2,15 @@
 
 # name: discourse-esp-webhooks
 # about: Receives and logs ESP webhook/postback events (bounces, unsubs, spam complaints) from SparkPost, Elastic Email, ReachMail, InboxRoad, Mailgun
-# version: 1.0.0
+# version: 1.1.0
 # authors: you
 
 enabled_site_setting :esp_webhooks_enabled
+
+register_asset "stylesheets/esp-webhooks.scss"
+
+# Admin UI entry under /admin/plugins (label from client locale: js.esp_webhooks.title)
+add_admin_route "esp_webhooks.title", "esp-webhooks"
 
 after_initialize do
   require "json"
@@ -395,4 +400,20 @@ after_initialize do
   Discourse::Application.routes.append do
     mount ::EspWebhooks::Engine, at: "/esp-webhook"
   end
+
+  # ---------------------------------------------------------------------------
+  # Admin UI (stats + webhook URLs) — /admin/plugins/esp-webhooks
+  # Same plugin-admin pattern as discourse-digest-campaigns.
+  # ---------------------------------------------------------------------------
+
+  Discourse::Application.routes.append do
+    get "/admin/plugins/esp-webhooks" => "admin/plugins#index", constraints: StaffConstraint.new
+
+    namespace :admin do
+      get "/esp-webhooks/stats.json"  => "esp_webhooks#stats"
+      get "/esp-webhooks/events.json" => "esp_webhooks#events"
+    end
+  end
+
+  require_relative "app/controllers/admin/esp_webhooks_controller"
 end

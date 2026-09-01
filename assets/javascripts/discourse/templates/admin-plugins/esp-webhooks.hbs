@@ -1,0 +1,307 @@
+<section class="admin-container esp-webhooks-admin">
+  <h1>ESP Webhooks</h1>
+
+  {{#if this.stats}}
+    {{! ---------------------------------------------------------------- }}
+    {{! Webhook URLs }}
+    {{! ---------------------------------------------------------------- }}
+    <div class="esp-panel">
+      <h2>
+        Webhook URLs
+        {{#if this.stats.enabled}}
+          <span class="esp-badge esp-badge--on">receiver enabled</span>
+        {{else}}
+          <span class="esp-badge esp-badge--off">receiver DISABLED — turn on “esp_webhooks_enabled”</span>
+        {{/if}}
+      </h2>
+
+      <p class="esp-hint">
+        Paste the matching URL into each ESP's webhook / postback settings. Method is
+        <strong>POST</strong>. The <code>esp=</code> value is required; add
+        <code>&amp;event=…</code> if you want to tag events.
+      </p>
+
+      <table class="esp-table esp-url-table">
+        <tbody>
+          <tr>
+            <th>Base</th>
+            <td><code>{{this.stats.endpoints.base}}</code></td>
+            <td class="esp-copy-cell">
+              <button
+                type="button"
+                class="btn btn-default btn-small"
+                {{on "click" (fn this.copyUrl this.stats.endpoints.base)}}
+              >
+                {{#if (eq this.copiedUrl this.stats.endpoints.base)}}Copied{{else}}Copy{{/if}}
+              </button>
+            </td>
+          </tr>
+          {{#each this.urlRows as |row|}}
+            <tr>
+              <th>{{row.key}}</th>
+              <td><code>{{row.url}}</code></td>
+              <td class="esp-copy-cell">
+                <button
+                  type="button"
+                  class="btn btn-default btn-small"
+                  {{on "click" (fn this.copyUrl row.url)}}
+                >
+                  {{#if (eq this.copiedUrl row.url)}}Copied{{else}}Copy{{/if}}
+                </button>
+              </td>
+            </tr>
+          {{/each}}
+        </tbody>
+      </table>
+    </div>
+
+    {{! ---------------------------------------------------------------- }}
+    {{! Filters }}
+    {{! ---------------------------------------------------------------- }}
+    <div class="esp-panel esp-filters">
+      <h2>Filters</h2>
+      <div class="esp-filter-row">
+        <label>
+          From
+          <input type="date" value={{this.from}} {{on "change" this.updateFrom}} />
+        </label>
+        <label>
+          To
+          <input type="date" value={{this.to}} {{on "change" this.updateTo}} />
+        </label>
+        <label>
+          Event type
+          <select {{on "change" this.updateEventType}}>
+            {{#each this.eventTypeOptions as |opt|}}
+              <option value={{opt}} selected={{eq this.eventType opt}}>{{opt}}</option>
+            {{/each}}
+          </select>
+        </label>
+        <label>
+          Provider
+          <select {{on "change" this.updateEsp}}>
+            {{#each this.espOptions as |opt|}}
+              <option value={{opt}} selected={{eq this.esp opt}}>{{opt}}</option>
+            {{/each}}
+          </select>
+        </label>
+        <button
+          type="button"
+          class="btn btn-primary"
+          disabled={{this.loading}}
+          {{on "click" this.applyFilters}}
+        >
+          Apply
+        </button>
+        <button
+          type="button"
+          class="btn btn-default"
+          disabled={{this.loading}}
+          {{on "click" this.resetFilters}}
+        >
+          Reset
+        </button>
+      </div>
+    </div>
+
+    {{! ---------------------------------------------------------------- }}
+    {{! Stat cards }}
+    {{! ---------------------------------------------------------------- }}
+    <div class="esp-cards">
+      <div class="esp-card">
+        <div class="esp-card__num">{{this.stats.totals.events}}</div>
+        <div class="esp-card__label">Parsed events</div>
+      </div>
+      <div class="esp-card">
+        <div class="esp-card__num">{{this.stats.totals.bounce}}</div>
+        <div class="esp-card__label">Bounces</div>
+      </div>
+      <div class="esp-card">
+        <div class="esp-card__num">{{this.stats.totals.complaint}}</div>
+        <div class="esp-card__label">Complaints</div>
+      </div>
+      <div class="esp-card">
+        <div class="esp-card__num">{{this.stats.totals.unsubscribe}}</div>
+        <div class="esp-card__label">Unsubscribes</div>
+      </div>
+      <div class="esp-card">
+        <div class="esp-card__num">{{this.stats.totals.unknown}}</div>
+        <div class="esp-card__label">Unknown</div>
+      </div>
+      <div class="esp-card">
+        <div class="esp-card__num">{{this.stats.totals.raw_hits}}</div>
+        <div class="esp-card__label">Raw hits</div>
+      </div>
+      <div class="esp-card">
+        <div class="esp-card__num">{{this.stats.totals.unparsed_raw_hits}}</div>
+        <div class="esp-card__label">Unparsed raw</div>
+      </div>
+    </div>
+
+    {{! ---------------------------------------------------------------- }}
+    {{! Breakdowns }}
+    {{! ---------------------------------------------------------------- }}
+    <div class="esp-grid-2">
+      <div class="esp-panel">
+        <h2>By provider</h2>
+        <table class="esp-table">
+          <tbody>
+            {{#each this.providerRows as |row|}}
+              <tr>
+                <th>{{row.esp}}</th>
+                <td class="esp-bar-cell">
+                  <span class="esp-bar">
+                    <span
+                      class="esp-bar__fill"
+                      style={{html-safe (concat "width:" row.pct "%")}}
+                    ></span>
+                  </span>
+                </td>
+                <td class="esp-num">{{row.count}}</td>
+              </tr>
+            {{else}}
+              <tr><td class="esp-empty">No events in range.</td></tr>
+            {{/each}}
+          </tbody>
+        </table>
+      </div>
+
+      <div class="esp-panel">
+        <h2>By event type</h2>
+        <table class="esp-table">
+          <tbody>
+            {{#each this.eventTypeRows as |row|}}
+              <tr>
+                <th>{{row.event_type}}</th>
+                <td class="esp-bar-cell">
+                  <span class="esp-bar">
+                    <span
+                      class="esp-bar__fill"
+                      style={{html-safe (concat "width:" row.pct "%")}}
+                    ></span>
+                  </span>
+                </td>
+                <td class="esp-num">{{row.count}}</td>
+              </tr>
+            {{else}}
+              <tr><td class="esp-empty">No events in range.</td></tr>
+            {{/each}}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="esp-panel">
+      <h2>By day</h2>
+      <div class="esp-day-scroll">
+        <table class="esp-table">
+          <tbody>
+            {{#each this.dayRows as |row|}}
+              <tr>
+                <th>{{row.day}}</th>
+                <td class="esp-bar-cell">
+                  <span class="esp-bar">
+                    <span
+                      class="esp-bar__fill"
+                      style={{html-safe (concat "width:" row.pct "%")}}
+                    ></span>
+                  </span>
+                </td>
+                <td class="esp-num">{{row.count}}</td>
+              </tr>
+            {{else}}
+              <tr><td class="esp-empty">No events in range.</td></tr>
+            {{/each}}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="esp-panel">
+      <h2>Top bounce classes</h2>
+      <table class="esp-table">
+        <thead>
+          <tr><th>Class</th><th>Count</th><th>Sample reason</th></tr>
+        </thead>
+        <tbody>
+          {{#each this.stats.top_bounce_classes as |row|}}
+            <tr>
+              <th>{{row.bounce_class}}</th>
+              <td class="esp-num">{{row.count}}</td>
+              <td class="esp-reason">{{row.sample}}</td>
+            </tr>
+          {{else}}
+            <tr><td class="esp-empty">No bounces in range.</td></tr>
+          {{/each}}
+        </tbody>
+      </table>
+    </div>
+
+    {{! ---------------------------------------------------------------- }}
+    {{! Recent events }}
+    {{! ---------------------------------------------------------------- }}
+    <div class="esp-panel">
+      <h2>
+        Events
+        <span class="esp-hint">
+          ({{this.eventsMeta.total}} match — page {{this.eventsMeta.page}} of
+          {{this.eventsMeta.total_pages}})
+        </span>
+      </h2>
+
+      <div class="esp-day-scroll">
+        <table class="esp-table esp-events-table">
+          <thead>
+            <tr>
+              <th>Received (UTC)</th>
+              <th>Provider</th>
+              <th>Type</th>
+              <th>Raw type</th>
+              <th>Recipient</th>
+              <th>Subject</th>
+              <th>Bounce class</th>
+              <th>Reason</th>
+            </tr>
+          </thead>
+          <tbody>
+            {{#each this.displayEvents as |row|}}
+              <tr>
+                <td>{{row.when}}</td>
+                <td>{{row.esp}}</td>
+                <td>{{row.event_type}}</td>
+                <td>{{row.raw_event_type}}</td>
+                <td>{{row.recipient_email}}</td>
+                <td class="esp-reason">{{row.subject}}</td>
+                <td>{{row.bounce_class}}</td>
+                <td class="esp-reason">{{row.bounce_reason}}</td>
+              </tr>
+            {{else}}
+              <tr><td class="esp-empty">No events match these filters.</td></tr>
+            {{/each}}
+          </tbody>
+        </table>
+      </div>
+
+      <div class="esp-pager">
+        <button
+          type="button"
+          class="btn btn-default"
+          disabled={{not this.hasPrev}}
+          {{on "click" this.prevPage}}
+        >
+          ← Prev
+        </button>
+        <button
+          type="button"
+          class="btn btn-default"
+          disabled={{not this.hasNext}}
+          {{on "click" this.nextPage}}
+        >
+          Next →
+        </button>
+      </div>
+    </div>
+  {{else}}
+    <p>Loading…</p>
+  {{/if}}
+</section>
