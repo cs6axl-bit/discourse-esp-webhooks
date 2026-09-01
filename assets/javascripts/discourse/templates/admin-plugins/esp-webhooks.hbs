@@ -56,6 +56,93 @@
     </div>
 
     {{! ---------------------------------------------------------------- }}
+    {{! Automated actions }}
+    {{! ---------------------------------------------------------------- }}
+    <div class="esp-panel">
+      <h2>
+        Automated actions
+        {{#if this.actionsEnabled}}
+          <span class="esp-badge esp-badge--on">enabled</span>
+        {{else}}
+          <span class="esp-badge esp-badge--off">disabled — “esp_webhooks_actions_enabled” site setting is off</span>
+        {{/if}}
+      </h2>
+      <p class="esp-hint">
+        When on, a matching event <strong>disables digest emails</strong> for that Discourse user
+        (<code>email_digests</code> off, <code>digest_after_minutes</code> 0). Complaint / unsubscribe
+        act once per user. Hard bounce acts once the count of hard bounces for that address within the
+        window reaches the threshold. Unknown addresses are ignored. Everything is off by default.
+      </p>
+
+      {{#if this.actionsNotice}}
+        <div class="alert alert-success">{{this.actionsNotice}}</div>
+      {{/if}}
+
+      <div class="esp-day-scroll">
+        <table class="esp-table esp-actions-table">
+          <thead>
+            <tr>
+              <th>Provider</th>
+              <th>Complaint</th>
+              <th>Unsubscribe</th>
+              <th>Hard bounce</th>
+              <th>Threshold</th>
+              <th>Window (days)</th>
+              <th>Also mark email bad</th>
+            </tr>
+          </thead>
+          <tbody>
+            {{#each this.providerActions as |row|}}
+              <tr>
+                <th>{{row.esp}}</th>
+                <td><Input @type="checkbox" @checked={{row.on_complaint}} /></td>
+                <td><Input @type="checkbox" @checked={{row.on_unsubscribe}} /></td>
+                <td><Input @type="checkbox" @checked={{row.on_hard_bounce}} /></td>
+                <td><Input @type="number" @value={{row.hard_bounce_threshold}} min="1" max="50" class="esp-num-input" /></td>
+                <td><Input @type="number" @value={{row.hard_bounce_window_days}} min="1" max="365" class="esp-num-input" /></td>
+                <td><Input @type="checkbox" @checked={{row.also_mark_email_bad}} /></td>
+              </tr>
+            {{/each}}
+          </tbody>
+        </table>
+      </div>
+
+      <div style="margin-top:12px">
+        <button
+          type="button"
+          class="btn btn-primary"
+          disabled={{this.savingActions}}
+          {{on "click" this.saveProviderActions}}
+        >
+          Save actions
+        </button>
+      </div>
+
+      {{#if this.recentActions.length}}
+        <h3 style="margin-top:22px">Recent actions</h3>
+        <div class="esp-day-scroll">
+          <table class="esp-table">
+            <thead>
+              <tr><th>When (UTC)</th><th>Provider</th><th>Email</th><th>Reason</th><th>Action</th><th>HB count</th></tr>
+            </thead>
+            <tbody>
+              {{#each this.recentActions as |a|}}
+                <tr>
+                  <td>{{a.when}}</td>
+                  <td>{{a.esp}}</td>
+                  <td>{{a.recipient_email}}</td>
+                  <td>{{a.reason}}</td>
+                  <td>{{a.action}}</td>
+                  <td class="esp-num">{{a.hard_bounce_count}}</td>
+                </tr>
+              {{/each}}
+            </tbody>
+          </table>
+        </div>
+      {{/if}}
+    </div>
+
+    {{! ---------------------------------------------------------------- }}
     {{! Filters }}
     {{! ---------------------------------------------------------------- }}
     <div class="esp-panel esp-filters">

@@ -3,3 +3,9 @@ plugins:
   esp_webhooks_enabled:
     default: false
     client: false
+
+  # Global kill switch for all automated actions (per-provider toggles on the
+  # admin page still gate each event/provider individually).
+  esp_webhooks_actions_enabled:
+    default: true
+    client: false

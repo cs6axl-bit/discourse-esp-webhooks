@@ -85,8 +85,23 @@ module Admin
 
       count_of = ->(type) { by_event_type.find { |x| x[:event_type] == type }&.fetch(:count).to_i }
 
+      af = actions_filter
+      actions_total =
+        DB.query_single("SELECT COUNT(*) FROM esp_webhook_actions a WHERE #{af[:where]}", af[:binds]).first.to_i
+
+      recent_actions =
+        DB.query(<<~SQL, af[:binds]).map { |r| action_row(r) }
+          SELECT a.id, a.created_at, a.esp, a.recipient_email, a.reason,
+                 a.action, a.hard_bounce_count, a.user_id
+          FROM esp_webhook_actions a
+          WHERE #{af[:where]}
+          ORDER BY a.created_at DESC, a.id DESC
+          LIMIT 20
+        SQL
+
       render_json_dump(
         enabled: SiteSetting.esp_webhooks_enabled,
+        actions_enabled: SiteSetting.esp_webhooks_actions_enabled,
         recognized_esps: ::EspWebhooks::RECOGNIZED_ESPS,
         endpoints: endpoints,
         filters: f[:echo],
@@ -98,13 +113,48 @@ module Admin
           unknown: count_of.call("unknown"),
           raw_hits: raw_total,
           unparsed_raw_hits: unparsed_total,
+          actions: actions_total,
         },
         by_provider: by_provider,
         by_event_type: by_event_type,
         by_day: by_day,
         top_bounce_classes: top_bounce_classes,
         recent: recent,
+        recent_actions: recent_actions,
       )
+    end
+
+    # GET /admin/esp-webhooks/provider-actions.json
+    def provider_actions
+      render_json_dump(provider_actions: ::EspWebhooks::RECOGNIZED_ESPS.map { |esp| provider_action_row(esp) })
+    end
+
+    # PUT /admin/esp-webhooks/provider-actions.json
+    def update_provider_actions
+      rows =
+        case params[:rows]
+        when String then (JSON.parse(params[:rows]) rescue [])
+        when Array then params[:rows]
+        else []
+        end
+
+      Array(rows).each do |raw|
+        h = raw.respond_to?(:to_unsafe_h) ? raw.to_unsafe_h : raw
+        next unless h.is_a?(Hash)
+        esp = ::EspWebhooks.normalize_esp(h["esp"] || h[:esp])
+        next unless ::EspWebhooks::RECOGNIZED_ESPS.include?(esp)
+
+        rec = ::EspWebhooks::ProviderAction.find_or_initialize_by(esp: esp)
+        rec.on_complaint            = truthy(h["on_complaint"] || h[:on_complaint])
+        rec.on_unsubscribe          = truthy(h["on_unsubscribe"] || h[:on_unsubscribe])
+        rec.on_hard_bounce          = truthy(h["on_hard_bounce"] || h[:on_hard_bounce])
+        rec.also_mark_email_bad     = truthy(h["also_mark_email_bad"] || h[:also_mark_email_bad])
+        rec.hard_bounce_threshold   = (h["hard_bounce_threshold"] || h[:hard_bounce_threshold]).to_i.clamp(1, 50)
+        rec.hard_bounce_window_days = (h["hard_bounce_window_days"] || h[:hard_bounce_window_days]).to_i.clamp(1, 365)
+        rec.save!
+      end
+
+      render_json_dump(provider_actions: ::EspWebhooks::RECOGNIZED_ESPS.map { |esp| provider_action_row(esp) })
     end
 
     # GET /admin/esp-webhooks/events.json
@@ -235,6 +285,59 @@ module Admin
         severity: r.severity,
         message_id: r.message_id,
       }
+    end
+
+    # Filter for esp_webhook_actions (alias `a`) — date + provider only.
+    def actions_filter
+      where = ["1=1"]
+      binds = {}
+
+      if (from = boundary_time(params[:from], :beginning))
+        where << "a.created_at >= :from"
+        binds[:from] = from
+      end
+      if (to = boundary_time(params[:to], :end))
+        where << "a.created_at <= :to"
+        binds[:to] = to
+      end
+
+      esp = ::EspWebhooks.normalize_esp(params[:esp])
+      if params[:esp].to_s.strip.downcase != "all" && esp.present?
+        where << "a.esp = :esp"
+        binds[:esp] = esp
+      end
+
+      { where: where.join(" AND "), binds: binds }
+    end
+
+    def action_row(r)
+      {
+        id: r.id,
+        created_at: r.created_at&.iso8601,
+        esp: r.esp,
+        recipient_email: r.recipient_email,
+        reason: r.reason,
+        action: r.action,
+        hard_bounce_count: r.hard_bounce_count,
+        user_id: r.user_id,
+      }
+    end
+
+    def provider_action_row(esp)
+      rec = ::EspWebhooks::ProviderAction.find_or_initialize_by(esp: esp)
+      {
+        esp: esp,
+        on_complaint: !!rec.on_complaint,
+        on_unsubscribe: !!rec.on_unsubscribe,
+        on_hard_bounce: !!rec.on_hard_bounce,
+        hard_bounce_threshold: rec.hard_bounce_threshold || 3,
+        hard_bounce_window_days: rec.hard_bounce_window_days || 90,
+        also_mark_email_bad: !!rec.also_mark_email_bad,
+      }
+    end
+
+    def truthy(value)
+      ActiveModel::Type::Boolean.new.cast(value) || false
     end
   end
 end

@@ -188,4 +188,21 @@
     gap: 8px;
     margin-top: 12px;
   }
+
+  .esp-actions-table {
+    th,
+    td {
+      text-align: center;
+    }
+    th:first-child,
+    td:first-child {
+      text-align: left;
+      text-transform: capitalize;
+    }
+  }
+
+  .esp-num-input {
+    width: 70px;
+    margin: 0;
+  }
 }

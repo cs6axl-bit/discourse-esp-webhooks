@@ -2,7 +2,7 @@
 
 # name: discourse-esp-webhooks
 # about: Receives and logs ESP webhook/postback events (bounces, unsubs, spam complaints) from SparkPost, Elastic Email, ReachMail, InboxRoad, Mailgun
-# version: 1.1.0
+# version: 1.2.0
 # authors: you
 
 enabled_site_setting :esp_webhooks_enabled
@@ -27,6 +27,25 @@ after_initialize do
     def self.normalize_esp(val)
       return nil if val.blank?
       val.to_s.strip.downcase.gsub(/[^a-z0-9]/, "")
+    end
+
+    # Heuristic: is this parsed bounce event a permanent/hard bounce?
+    # ev keys: :event_type :bounce_class :severity :raw_event_type :bounce_reason
+    def self.hard_bounce?(ev)
+      return false unless ev[:event_type].to_s == "bounce"
+
+      bc     = ev[:bounce_class].to_s.strip.downcase
+      sev    = ev[:severity].to_s.strip.downcase
+      raw    = ev[:raw_event_type].to_s.strip.downcase
+      reason = ev[:bounce_reason].to_s.strip
+
+      return true if sev.include?("perm") || sev.start_with?("5.")
+      return true if bc.include?("hard") || bc == "permanent"
+      return true if %w[10 90].include?(bc) # SparkPost hard bounce classes
+      return true if raw == "out_of_band" || raw.include?("permanent")
+      return true if reason.match?(/\A5\.\d/) || reason.match?(/\b55\d\b/)
+
+      false
     end
   end
 
@@ -342,7 +361,7 @@ after_initialize do
 
           if parsed_events.present?
             parsed_events.each do |ev|
-              DB.exec(<<~SQL,
+              event_ids = DB.query_single(<<~SQL,
                 INSERT INTO esp_webhook_events
                   (raw_log_id, received_at, esp, esp_param, event_param,
                    event_type, raw_event_type, recipient_email, sender_email,
@@ -353,6 +372,7 @@ after_initialize do
                    :event_type, :raw_event_type, :recipient_email, :sender_email,
                    :message_id, :subject, :bounce_class, :bounce_reason, :severity,
                    :raw_event_json, NOW())
+                RETURNING id
               SQL
                 raw_log_id:      raw_log_id,
                 esp:             esp_key,
@@ -369,6 +389,13 @@ after_initialize do
                 severity:        ev[:severity].to_s[0, 64],
                 raw_event_json:  ev[:raw_event_json].to_s,
               )
+
+              # --- Automated action (per-provider config; no-op unless enabled) ---
+              begin
+                ::EspWebhooks::Actions.process(ev, esp_key, event_ids.first)
+              rescue => e
+                Rails.logger.error("[#{::EspWebhooks::PLUGIN_NAME}] action failed: #{e.class}: #{e.message}")
+              end
             end
           end
         rescue => e
@@ -406,14 +433,22 @@ after_initialize do
   # Same plugin-admin pattern as discourse-digest-campaigns.
   # ---------------------------------------------------------------------------
 
+  require_relative "app/models/esp_webhooks/provider_action"
+  require_relative "app/models/esp_webhooks/action"
+  require_relative "lib/esp_webhooks/actions"
+
   Discourse::Application.routes.append do
     get "/admin/plugins/esp-webhooks" => "admin/plugins#index", constraints: StaffConstraint.new
 
     namespace :admin do
-      get "/esp-webhooks/stats.json"  => "esp_webhooks#stats"
-      get "/esp-webhooks/events.json" => "esp_webhooks#events"
+      get "/esp-webhooks/stats.json"             => "esp_webhooks#stats"
+      get "/esp-webhooks/events.json"            => "esp_webhooks#events"
+      get "/esp-webhooks/provider-actions.json"  => "esp_webhooks#provider_actions"
+      put "/esp-webhooks/provider-actions.json"  => "esp_webhooks#update_provider_actions"
     end
   end
 
   require_relative "app/controllers/admin/esp_webhooks_controller"
+
+  ::EspWebhooks::ProviderAction.seed!
 end
