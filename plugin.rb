@@ -1,8 +1,8 @@
 # frozen_string_literal: true
 
 # name: discourse-esp-webhooks
-# about: Receives and logs ESP webhook/postback events (bounces, unsubs, spam complaints) from SparkPost, Elastic Email, ReachMail, InboxRoad, Mailgun
-# version: 1.2.0
+# about: Receives and logs ESP webhook/postback events (bounces, unsubs, spam complaints) from SparkPost, Elastic Email, ReachMail, InboxRoad, Mailgun, SendGrid (+ SendGrid delivery events)
+# version: 1.3.0
 # authors: you
 
 enabled_site_setting :esp_webhooks_enabled
@@ -21,8 +21,8 @@ after_initialize do
 
   module ::EspWebhooks
     PLUGIN_NAME = "discourse-esp-webhooks"
-    RECOGNIZED_ESPS = %w[sparkpost elasticemail reachmail inboxroad mailgun].freeze
-    MAX_BODY_SIZE = 1_048_576 # 1 MB safety cap
+    RECOGNIZED_ESPS = %w[sparkpost elasticemail reachmail inboxroad mailgun sendgrid].freeze
+    MAX_BODY_SIZE = 8_388_608 # 8 MB safety cap (SendGrid batches many events per POST; a cut body = unparseable JSON)
 
     def self.normalize_esp(val)
       return nil if val.blank?
@@ -73,6 +73,7 @@ after_initialize do
       when "elasticemail" then ElasticEmail.parse(body_str, content_type)
       when "inboxroad"    then InboxRoad.parse(body_str)
       when "mailgun"      then Mailgun.parse(body_str)
+      when "sendgrid"     then SendGrid.parse(body_str)
       when "reachmail"    then ReachMail.parse(body_str, content_type)
       end
     rescue => e
@@ -248,6 +249,69 @@ after_initialize do
           severity:        ev["severity"],
           raw_event_json:  JSON.generate(ev),
         }]
+      end
+    end
+
+    # -------------------------------------------------------------------------
+    # SendGrid Event Webhook
+    # Sends a JSON array of flat event objects, batched:
+    #   [{"email":..,"timestamp":..,"event":"delivered","sg_event_id":..,
+    #     "sg_message_id":..,"smtp-id":"<..>","response":"250 OK", ...}]
+    # Delivery events are kept too (deliverability reads: Microsoft / Apple
+    # deferrals + blocks with the receiving server's response):
+    #   processed / delivered / deferred / dropped / blocked → own event_type
+    #   bounce (type "bounce")  → "bounce"  (hard; status e.g. 5.1.1)
+    #   bounce (type "blocked") → "blocked" (reputation / content block: NOT a
+    #                             bad address, so never a hard-bounce action)
+    #   spamreport → complaint, unsubscribe / group_unsubscribe → unsubscribe
+    #   open / click → "open" / "click" (owner 2026-11-16: keep them, "might
+    #   need that some day"; click url in bounce_reason, user agent in raw json)
+    # group_resubscribe is skipped (the raw POST is still in esp_webhook_raw_logs).
+    # -------------------------------------------------------------------------
+    module SendGrid
+      TYPE_MAP = {
+        "processed"         => "processed",
+        "delivered"         => "delivered",
+        "deferred"          => "deferred",
+        "dropped"           => "dropped",
+        "open"              => "open",
+        "click"             => "click",
+        "spamreport"        => "complaint",
+        "unsubscribe"       => "unsubscribe",
+        "group_unsubscribe" => "unsubscribe",
+      }.freeze
+
+      def self.parse(body_str)
+        data = JSON.parse(body_str)
+        data = [data] unless data.is_a?(Array)
+
+        events = []
+        data.each do |ev|
+          next unless ev.is_a?(Hash)
+          raw_type = ev["event"].to_s
+          norm_type =
+            if raw_type == "bounce"
+              ev["type"].to_s == "blocked" ? "blocked" : "bounce"
+            else
+              TYPE_MAP[raw_type]
+            end
+          next unless norm_type
+
+          bounce_type = ev["type"].to_s.presence # "bounce" / "blocked" on bounce events
+          events << {
+            event_type:      norm_type,
+            raw_event_type:  bounce_type && raw_type == "bounce" ? "bounce:#{bounce_type}" : raw_type,
+            recipient_email: ev["email"],
+            sender_email:    nil,
+            message_id:      ev["smtp-id"].presence || ev["sg_message_id"],
+            subject:         nil,
+            bounce_class:    ev["bounce_classification"].presence || (raw_type == "bounce" ? bounce_type : nil),
+            bounce_reason:   ev["reason"].presence || ev["response"].presence || ev["url"],
+            severity:        ev["status"].presence || (ev["attempt"].present? ? "attempt #{ev["attempt"]}" : nil),
+            raw_event_json:  JSON.generate(ev),
+          }
+        end
+        events.empty? ? nil : events
       end
     end
 

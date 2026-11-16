@@ -1,7 +1,9 @@
 # discourse-esp-webhooks
 
 Receives and **logs** ESP webhook / postback events (bounces, spam complaints,
-unsubscribes) from SparkPost, Elastic Email, ReachMail, InboxRoad and Mailgun.
+unsubscribes) from SparkPost, Elastic Email, ReachMail, InboxRoad, Mailgun and SendGrid.
+For SendGrid the delivery events are kept as well (processed, delivered, deferred,
+dropped, blocked, open, click).
 Logging only — nothing acts on Discourse (no email suppression / unsubscribe).
 
 ## Install
@@ -17,8 +19,27 @@ One endpoint, `esp=` selects the parser:
 POST https://<your-forum>/esp-webhook?esp=<key>
 ```
 
-`<key>` ∈ `sparkpost` · `elasticemail` · `reachmail` · `inboxroad` · `mailgun`.
+`<key>` ∈ `sparkpost` · `elasticemail` · `reachmail` · `inboxroad` · `mailgun` · `sendgrid`.
 `&event=<label>` is optional (stored, not required). No auth / signature check.
+
+### SendGrid
+
+Settings → Mail Settings → Event Webhooks → create one webhook per SendGrid
+account, Post URL `https://<forum>/esp-webhook?esp=sendgrid&event=<account label>`
+(e.g. `event=sg1`, `event=sg2`; the label lands in `event_param`). SendGrid posts
+batched JSON arrays. Event mapping:
+
+| SendGrid event | event_type |
+|---|---|
+| processed / delivered / deferred / dropped / open / click | same name |
+| bounce, type `bounce` | `bounce` (hard; `severity` = status, e.g. 5.1.1) |
+| bounce, type `blocked` | `blocked` (reputation / content block, never a hard-bounce action) |
+| spamreport | `complaint` |
+| unsubscribe / group_unsubscribe | `unsubscribe` |
+
+`bounce_reason` = SendGrid `reason` / `response` (the receiving server's answer) or the
+clicked `url`; `bounce_class` = `bounce_classification`; `severity` = `status` or
+`attempt N` on deferrals; `message_id` = `smtp-id` (else `sg_message_id`).
 
 The exact URLs (with your forum's base URL) and copy buttons are on the admin
 page.
