@@ -3,7 +3,10 @@
 Receives and **logs** ESP webhook / postback events (bounces, spam complaints,
 unsubscribes) from SparkPost, Elastic Email, ReachMail, InboxRoad, Mailgun and SendGrid.
 For SendGrid the delivery events are kept as well (processed, delivered, deferred,
-dropped, blocked, open, click).
+dropped, blocked, open, click). Mailgun (v1.4.0) likewise: accepted, delivered,
+rejected → `dropped`, opened → `open`, clicked → `click`, failed + severity
+`temporary` → `deferred`, failed + `permanent` → `bounce`. Mailgun webhooks are set
+per sending domain and per event type (same URL for all, e.g. `?esp=mailgun&event=mg2`).
 Logging only — nothing acts on Discourse (no email suppression / unsubscribe).
 
 ## Install

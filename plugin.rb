@@ -2,7 +2,7 @@
 
 # name: discourse-esp-webhooks
 # about: Receives and logs ESP webhook/postback events (bounces, unsubs, spam complaints) from SparkPost, Elastic Email, ReachMail, InboxRoad, Mailgun, SendGrid (+ SendGrid delivery events)
-# version: 1.3.0
+# version: 1.4.0
 # authors: you
 
 enabled_site_setting :esp_webhooks_enabled
@@ -220,11 +220,22 @@ after_initialize do
     # event values: "failed" => bounce, "unsubscribed" => unsubscribe,
     #               "complained" => complaint
     # -------------------------------------------------------------------------
+    # v1.4.0 (owner 2026-11-16): delivery events kept too, like SendGrid —
+    #   accepted / delivered / rejected (→ dropped) / opened (→ open) /
+    #   clicked (→ click); failed + severity "temporary" → "deferred" (a retry,
+    #   never a hard bounce), failed + "permanent" → "bounce".
+    #   raw_event_type = "failed:<severity>" on failures; bounce_reason = the
+    #   receiving server's message (or the clicked url).
     module Mailgun
       EVENT_MAP = {
         "failed"       => "bounce",
         "unsubscribed" => "unsubscribe",
         "complained"   => "complaint",
+        "accepted"     => "accepted",
+        "delivered"    => "delivered",
+        "rejected"     => "dropped",
+        "opened"       => "open",
+        "clicked"      => "click",
       }.freeze
 
       def self.parse(body_str)
@@ -233,19 +244,20 @@ after_initialize do
         raw_type = ev["event"].to_s
         norm     = EVENT_MAP[raw_type]
         return nil unless norm
+        norm = "deferred" if raw_type == "failed" && ev["severity"].to_s == "temporary"
 
         delivery = ev["delivery-status"] || {}
 
         [{
           event_type:      norm,
-          raw_event_type:  raw_type,
+          raw_event_type:  raw_type == "failed" && ev["severity"].present? ? "failed:#{ev["severity"]}" : raw_type,
           recipient_email: ev["recipient"],
           sender_email:    ev.dig("envelope", "sender") ||
                            ev.dig("message", "headers", "from"),
           message_id:      ev.dig("message", "headers", "message-id"),
           subject:         ev.dig("message", "headers", "subject"),
           bounce_class:    delivery["bounce-type"],
-          bounce_reason:   delivery["message"] || delivery["description"],
+          bounce_reason:   delivery["message"].presence || delivery["description"].presence || ev["url"],
           severity:        ev["severity"],
           raw_event_json:  JSON.generate(ev),
         }]
